@@ -1,0 +1,983 @@
+---
+title: "Movies on Streaming Platforms"
+author: "Brianna Humphries"
+date: "12/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Cleaning
+
+```{r clean, echo=TRUE}
+library(readr)
+#Data set found at:
+#https://www.kaggle.com/ruchi798/movies-on-netflix-prime-video-hulu-and-disney
+#Updated May 22, 2020
+#16744 total movies in data set
+movdata <- read_csv("MoviesOnStreamingPlatforms_updated.csv", 
+    col_types = cols(X1 = col_skip(), Year = col_integer()))
+
+#rename variables in data set for easier use
+names(movdata)[6] <- "RottenTomatoes"
+names(movdata)[9] <- "PrimeVideo"
+names(movdata)[10] <- "Disney"
+
+#change variables to factor
+movdata$Year <- as.factor(movdata$Year)
+movdata$Age <- as.factor(movdata$Age)
+movdata$Netflix <- as.factor(movdata$Netflix)
+movdata$Hulu <- as.factor(movdata$Hulu)
+movdata$PrimeVideo <- as.factor(movdata$PrimeVideo)
+movdata$Disney <- as.factor(movdata$Disney)
+
+#rename Age level all to All, and Platform levels to Yes or No
+library(plyr)
+movdata$Age <- revalue(movdata$Age, c("all"="All"))
+movdata$Netflix <- revalue(movdata$Netflix, c("0"="No", "1"="Yes"))
+movdata$Hulu <- revalue(movdata$Hulu, c("0"="No", "1"="Yes"))
+movdata$PrimeVideo <- revalue(movdata$PrimeVideo, c("0"="No", "1"="Yes"))
+movdata$Disney <- revalue(movdata$Disney, c("0"="No", "1"="Yes"))
+#rename age levels to more known language
+movdata$Age <- revalue(movdata$Age, c("All"="G", "7+"="PG", "13+"="PG-13", "16+"="TV-14", "18+"="R")) 
+
+#Order Age groups from young to old
+movdata$Age <- ordered(movdata$Age, levels = c("G", "PG", "PG-13", "TV-14", "R"))
+
+#Remove % symbol from Rotten Tomatoes variable and change to numeric
+movdata$RottenTomatoes <- gsub("%", "", movdata$RottenTomatoes)
+movdata$RottenTomatoes <- as.numeric(movdata$RottenTomatoes)
+
+#remove Type column
+movdata <- subset(movdata, select = -c(11))
+
+#Show first 6 rows of dataset
+head(movdata[1:10])
+head(movdata[11:15])
+attach(movdata)
+```
+### Column Descriptions
+
+**Title**: Title of Movie   
+**Year**: Year in which the Movie was released  (1902-2020)  
+**Age**: Target Age Group (G, PG, PG-13, TV-14, R)  
+**IMDb**: IMDb rating (0-10)  
+**RottenTomatoes**: Rotten Tomatoes percentage rating (0-100)  
+**Netflix**: Whether the movie is found on Netflix (Yes or No)  
+**Hulu**: Whether the movie is found on Hulu (Yes or No)  
+**PrimeVideo**: Whether the movie is found on Prime Video (Yes or No)  
+**Disney**: Whether the movie is found on Disney+ (Yes or No)  
+**Directors**: Lists the directors of the movie  
+**Genres**: Lists the genres of the movie  
+**Country**: Lists the countries the movie is available in  
+**Language**: Lists the languages the movie is available in  
+**Runtime**: Length of movie in minutes  
+
+
+### Summary of Data
+```{r summary, echo=TRUE}
+#Show summary of data
+#56.1% missing Age data
+#3.4% missing IMDb data
+#69.2% missing RottenTomatoes data
+#1.6% missing Genres data (275)
+#4.3% missing Directors data (726)
+#3.5% missing Runtime data
+summary(movdata)
+```
+
+## Directors
+```{r Directors, echo=TRUE}
+#highest- Jay Chapman 
+  #All around 60 minute comedies on Netflix or Prime Video
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+dirdata <- movdata[complete.cases(movdata$Directors),] #data set without missing Directors - 16018 obs.
+dirfreq <- count(dirdata, Directors) #freq of Directors
+dirfreq$rank <- rank(-dirfreq$n,ties.method="min")
+dirfreq <- dirfreq[order(dirfreq$rank,decreasing = F),]
+top10dira <- dirfreq[dirfreq$rank < 11,]
+#Top 10 Genre groups
+dir_10 <- ggplot(top10dira, aes(x=reorder(Directors,-n), y=n, fill=Directors))+
+  xlab("Directors")+
+  ylab("Number of Movies")+
+  ylim(0, 40)+
+  ggtitle("Top 10 Director Groups")+
+  geom_text(aes(label=n), vjust = -.5) +
+  theme(legend.position = "none", axis.text = element_text(size=12), plot.title = element_text(hjust=0.5),
+        axis.text.x = element_text(angle = 55, vjust=0.95, hjust = 0.95))+
+  geom_bar(stat="identity", width=0.75)
+dir_10
+```
+
+```{r directorsplit}
+#12453 different directors
+#9540 only directed 1 movie - 76.6%
+#1749 directed 2 movies - 14%
+library(data.table)
+data0 <- movdata[,c(1,11)] #data set with movie ID and directors
+data0 <- data0[complete.cases(data0$Directors),] #remove NAs
+dt1 <- as.data.table(data0) #change to data table
+#split the Directors by commas and create another row from the split with same ID
+directors1 <- setDT(dt1)[,lapply(.SD, function(x) unlist(tstrsplit(x, ",",fixed=TRUE))), by = data0$ID]
+dirfreq1 <- count(directors1, Directors) #frequency of Directors
+dirfreq1$rank <- rank(-dirfreq1$n,ties.method="min") #create rank column by frequency
+dirfreq1 <- dirfreq1[order(dirfreq1$rank,decreasing = F),] #order by decreasing rank
+top50dir <- dirfreq1[dirfreq1$rank < 51,]
+library(plotly)
+#plotly graph of directors by decreasing rank
+dir_sep <- plot_ly(top50dir, x = ~reorder(Directors, rank), y = ~n, type = 'bar', name = 'Directors') %>%
+  layout(xaxis = list(title = "Directors"),
+         yaxis = list(title = "Number of Movies"),
+         title= "Top 50 Directors on Streaming Platforms")
+dir_sep
+```
+
+## Genres
+```{r genregroups, echo=TRUE}
+#Genres:
+#Action, Adventure, Animation, Biography, Comedy, Crime, Documentary, Drama, Family, Fantasy, Film-Noir, Game-Show, History, Horror, Music, Musical, Mystery, News, Reality-TV, Romance, Sci-Fi, Short, Sport, Talk-Show, Thriller, War, Western
+
+#create graph representing the top 10 genre groups
+genredata <- movdata[complete.cases(movdata$Genres),] #data set without missing Genres - 16469 obs.
+genrefreq <- count(genredata, Genres) #
+genrefreq$rank <- rank(-genrefreq$n,ties.method="min")
+genrefreq <- genrefreq[order(genrefreq$rank,decreasing = F),]
+top10genresa <- genrefreq[genrefreq$rank < 11,]
+#Top 10 Genre groups
+genres_10 <- ggplot(top10genresa, aes(x=reorder(Genres,-n), y=n, fill=Genres))+
+  xlab("Genres")+
+  ylab("Number of Movies")+
+  ylim(0, 1500)+
+  ggtitle("Top 10 Genre Groups")+
+  geom_text(aes(label=n), vjust = -.5) +
+  theme(legend.position = "none", axis.text = element_text(size=12), plot.title = element_text(hjust=0.5),
+        axis.text.x = element_text(angle = 55, vjust=0.95, hjust = 0.95))+
+  geom_bar(stat="identity", width=0.75)
+genres_10
+#Drama - 8.1%
+```
+
+```{r genresplit}
+data1 <- movdata[,c(1,12)] #data set with movie ID and genres
+data1 <- data1[complete.cases(data1$Genres),] #remove NAs
+dt <- as.data.table(data1) #change to data table
+#split the genres by commas and create another row from the split with same ID
+genre1 <- setDT(dt)[,lapply(.SD, function(x) unlist(tstrsplit(x, ",",fixed=TRUE))), by = data1$ID]
+genrefreq1 <- count(genre1, Genres) #frequency of genres
+genrefreq1$rank <- rank(-genrefreq1$n,ties.method="min") #create rank column by frequency
+genrefreq1 <- genrefreq1[order(genrefreq1$rank,decreasing = F),] #order by decreasing rank
+#plotly graph of genres by decreasing rank
+genre_sep <- plot_ly(genrefreq1, x = ~reorder(Genres, rank), y = ~n, type = 'bar', name = 'Genres') %>%
+  layout(xaxis = list(title = "Genres ordered by Frequency"),
+         yaxis = list(title = "Number of Movies"),
+         title= "Genres")
+genre_sep
+#Drama- 43.9%
+#Comedy - 28.2%
+```
+
+### Which words are most often in the movie titles?
+```{r titlewordcloud}
+#create wordcloud of movie titles
+library(wordcloud)
+library(tm)
+library(RColorBrewer)
+library(SnowballC)
+titledata <- movdata$Title
+docs <- Corpus(VectorSource(titledata))
+docs
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, "", x))
+docs <- tm_map(docs, toSpace, ":")
+docs <- tm_map(docs, toSpace, "-")
+docs <- tm_map(docs, content_transformer(tolower)) #lowercase
+docs <- tm_map(docs, removeNumbers) #remove numbers
+docs <- tm_map(docs, removeWords, c("the", "at", "of", "on", 
+                                    "and", "vs", "an", "for", "from", "with")) #remove common words
+docs <- tm_map(docs, removePunctuation) #remove punctuation
+docs <- tm_map(docs, stripWhitespace) #remove extra white space
+dtm <- TermDocumentMatrix(docs)
+m <- as.matrix(dtm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+head(d, 20)
+cloud <- wordcloud(words = d$word, freq = d$freq, min.freq = 1,
+          max.words=50, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+### Streaming Platforms
+```{r plat, echo=TRUE}
+#number of movies in each platform
+#No missing data in each platform
+platMat <- sapply(X = movdata[7:10], FUN = table) #frequency table
+platforms <- c("Netflix", "Hulu", "Prime Video", "Disney+") #names of platforms
+count_no <- platMat[1:1, 1:4] #extracts frequencies of "No" values
+count_yes <- platMat[2:2, 1:4] #extracts frequencies of "Yes" values
+count_yesN <- count_yes[1] #total number of movies in Netflix - 3560 (21.3%)
+count_yesH <- count_yes[2] #total number of movies in Hulu - 903 (5.4%)
+count_yesP <- count_yes[3] #total number of movies in Prime Video - 12354 (73.8%)
+count_yesD <- count_yes[4] #total number of movies in Disney - 564 (3.4%)
+platdata <- data.frame(platforms, count_yes, count_no) #reorganization of freq table
+
+#Plot number of movies in each platform as a grouped bar chart
+plat <- plot_ly(platdata, x = ~platforms, y = ~count_yes, type = 'bar', name = 'Yes') %>%
+  add_trace(y = ~count_no, name = 'No') %>%
+  layout(title = "Number of Movies in Each Streaming Platform",
+                        yaxis = list(title = 'Number of Movies'), 
+                        xaxis = list(title = 'Streaming Platform'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Is the movie in the platform?")))
+plat #plot plat
+```
+
+## Years
+```{r years, echo=TRUE}
+#Years
+#No missing values in data set
+yearP <- plot_ly(movdata, x = ~Year) %>%
+  add_histogram() %>% 
+  layout(title = "Number of Movies per Year",
+        xaxis = list(title = "Year"),
+        yaxis = list(title = "Number of Movies"))
+yearP
+```
+
+## Platforms Content by Release Year
+```{r platYear, echo=TRUE}
+library(purrr)
+library(dplyr)
+#create data sets with counts of Movies per year for each platform
+yearNetflix <- movdata %>% modify_if(is.character, as.factor) %>% group_by(Netflix, Year) %>% tally() %>% filter(Netflix == "Yes") %>% na.omit() %>% ungroup() %>% select(-Netflix) %>% 
+  mutate(NetflixPer = (n / count_yesN)*100)
+names(yearNetflix)[2] <- "Netflix" 
+
+yearHulu <- movdata %>% modify_if(is.character, as.factor) %>% group_by(Hulu, Year) %>% tally() %>% filter(Hulu == "Yes") %>% na.omit() %>% ungroup() %>% select(-Hulu) %>% 
+  mutate(HuluPer = (n / count_yesH)*100)
+names(yearHulu)[2] <- "Hulu" 
+
+yearPrime <- movdata %>% modify_if(is.character, as.factor) %>% group_by(PrimeVideo, Year) %>% tally() %>% filter(PrimeVideo == "Yes") %>% na.omit() %>% ungroup() %>% select(-PrimeVideo) %>% 
+  mutate(PrimePer = (n / count_yesP)*100)
+names(yearPrime)[2] <- "PrimeVideo" 
+
+yearDisney <- movdata %>% modify_if(is.character, as.factor) %>% group_by(Disney, Year) %>% tally() %>% filter(Disney == "Yes") %>% na.omit() %>% ungroup() %>% select(-Disney) %>% 
+  mutate(DisneyPer = (n / count_yesD)*100)
+names(yearDisney)[2] <- "Disney" 
+
+#join datasets and replace NAs with 0
+yearPlatData <- full_join(yearNetflix, yearHulu, by="Year")
+yearPlatData <- full_join(yearPlatData, yearPrime, by="Year")
+yearPlatData <- full_join(yearPlatData, yearDisney, by="Year")
+yearPlatData <- yearPlatData %>% mutate_all(~replace(., is.na(.), 0))
+yearPlatData$Year <- as.factor(yearPlatData$Year)
+yearPlatData <- yearPlatData[order(yearPlatData$Year),] #order Years
+
+#plot of movie count per year per platform
+yearPlatPlot <- plot_ly(yearPlatData, x = ~Year, y = ~Netflix, type = 'scatter', mode = "lines", name = 'Netflix', line = list(color = "firebrick")) %>%
+    add_trace(y = ~Hulu, name = 'Hulu', mode="lines", line = list(color = "#00EE76")) %>%
+    add_trace(y = ~PrimeVideo, name = 'Prime Video', mode="lines", line = list(color = "#000033")) %>%
+    add_trace(y = ~Disney, name = 'Disney+', mode="lines", line = list(color = "#0A47CC")) %>%
+    layout(title = "Each Platform's Content Available by Release Year",
+                        yaxis = list(title = 'Number of Movies'), 
+                        xaxis = list(title = 'Year'),
+                        legend = list(title = list(text = "Platform")))
+
+yearPlatPlot
+
+#plot of movie percent per year per platform
+yearPlatPlotPer <- plot_ly(yearPlatData, x = ~Year, y = ~NetflixPer, type = 'scatter', mode = "lines", name = 'Netflix', line = list(color = "firebrick")) %>%
+    add_trace(y = ~HuluPer, name = 'Hulu', mode="lines", line = list(color = "#00EE76")) %>%
+    add_trace(y = ~PrimePer, name = 'Prime Video', mode="lines", line = list(color = "#000033")) %>%
+    add_trace(y = ~DisneyPer, name = 'Disney+', mode="lines", line = list(color = "#0A47CC")) %>%
+    layout(title = "Each Platform's Content Available by Release Year",
+                        yaxis = list(title = 'Percent of Movies in Platform'), 
+                        xaxis = list(title = 'Year'),
+                        legend = list(title = list(text = "Platform")))
+
+yearPlatPlotPer
+```
+
+## Age Group
+```{r agegrp, echo=TRUE}
+#Age
+#9390 missing values in data set, so graph includes 7354 observations, 56.1%
+ageNA <- movdata[complete.cases(movdata$Age),] #data set without missing age obs.
+ageP <- plot_ly(ageNA, x = ~Age) %>%
+  add_histogram() %>% 
+  layout(title = "Number of Movies per Age Group",
+        xaxis = list(title = "Age Group"),
+        yaxis = list(title = "Number of Movies"))
+ageP
+```
+
+## Platforms by Age Group
+```{r agePlat, echo=TRUE}
+#Count how many movies in platforms when missing ages values are taken out
+platMatAgeCount <- sapply(X = ageNA[7:10], FUN = table)
+platforms <- c("Netflix", "Hulu", "Prime Video", "Disney+")
+count_noA <- platMatAgeCount[1:1, 1:4]
+count_yesA <- platMatAgeCount[2:2, 1:4]
+count_yesAN <- count_yesA[1]
+count_yesAH <- count_yesA[2]
+count_yesAP <- count_yesA[3]
+count_yesAD <- count_yesA[4]
+
+#Create datasets for each platform with count levels
+ageNetflix <- ageNA %>% modify_if(is.character, as.factor) %>% group_by(Netflix, Age) %>% tally() %>% filter(Netflix == "Yes") %>% na.omit() %>% ungroup() %>% select(-Netflix) %>% 
+  mutate(NetflixPer = (n / count_yesAN)*100)
+names(ageNetflix)[2] <- "Netflix" 
+
+ageHulu <- ageNA %>% modify_if(is.character, as.factor) %>% group_by(Hulu, Age) %>% tally() %>% filter(Hulu == "Yes") %>% na.omit() %>% ungroup() %>% select(-Hulu) %>% 
+  mutate(HuluPer = (n / count_yesAH)*100)
+names(ageHulu)[2] <- "Hulu" 
+
+agePrime <- ageNA %>% modify_if(is.character, as.factor) %>% group_by(PrimeVideo, Age) %>% tally() %>% filter(PrimeVideo == "Yes") %>% na.omit() %>% ungroup() %>% select(-PrimeVideo) %>% 
+  mutate(PrimePer = (n / count_yesAP)*100)
+names(agePrime)[2] <- "PrimeVideo" 
+
+ageDisney <- ageNA %>% modify_if(is.character, as.factor) %>% group_by(Disney, Age) %>% tally() %>% filter(Disney == "Yes") %>% na.omit() %>% ungroup() %>% select(-Disney) %>% 
+  mutate(DisneyPer = (n / count_yesAD)*100)
+names(ageDisney)[2] <- "Disney" 
+
+#Join datasets by Age and replace any null values to be 0
+agePlatData <- full_join(ageNetflix, ageHulu, by="Age")
+agePlatData <- full_join(agePlatData, agePrime, by="Age")
+agePlatData <- full_join(agePlatData, ageDisney, by="Age")
+agePlatData <- agePlatData %>% mutate_all(~replace(., is.na(.), 0))
+
+#create distribution of platforms for movies without missing ages
+ageplatNA <- plot_ly(ageNA, x = ~platforms, y = ~count_yesA, type = 'bar', name = 'Yes') %>%
+  add_trace(y = ~count_noA, name = 'No') %>%
+  layout(title = "Number of Movies in Each Streaming Platform (w/o missing ages)",
+                        yaxis = list(title = 'Number of Movies'), 
+                        xaxis = list(title = 'Streaming Platform'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Is the movie in the platform?")))
+ageplatNA #plot
+
+#Create plot of count of ages by platforms
+agePlat <- plot_ly(agePlatData, x = ~Age, y = ~Netflix, type = 'bar', name = 'Netflix', marker = list(color = "firebrick")) %>%
+    add_trace(y = ~Hulu, name = 'Hulu', marker = list(color = "#00EE76")) %>%
+    add_trace(y = ~PrimeVideo, name = 'Prime Video', marker = list(color = "#000033")) %>%
+    add_trace(y = ~Disney, name = 'Disney+', marker = list(color = "#0A47CC")) %>%
+    layout(title = "Number of Movies of Each Rating in Each Platform",
+                        yaxis = list(title = 'Number Of Movies'), 
+                        xaxis = list(title = 'Age Group'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Platform")))
+
+#Create plot of percent of ages by platforms
+agePlatPer <- plot_ly(agePlatData, x = ~Age, y = ~NetflixPer, type = 'bar', name = 'Netflix', marker = list(color = "firebrick")) %>%
+    add_trace(y = ~HuluPer, name = 'Hulu', marker = list(color = "#00EE76")) %>%
+    add_trace(y = ~PrimePer, name = 'Prime Video', marker = list(color = "#000033")) %>%
+    add_trace(y = ~DisneyPer, name = 'Disney+', marker = list(color = "#0A47CC")) %>%
+    layout(title = "Percent of Movies in Each Age Group for Each Platform",
+                        yaxis = list(title = 'Percent of Movies in Platform'), 
+                        xaxis = list(title = 'Age Group'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Platform")))
+agePlat
+agePlatPer
+```
+
+## Runtime
+```{r runtime}
+#Max: 1256 min (20.9 hours)
+  #Movie: Colorado
+  #Platform: Prime Video
+  #Year: 1940
+  #IMDb: 5.9
+  #Country: United States
+#Next: 750 min (12.5 hours)
+  #Movie: Law of the Lawless
+  #Platform: Prime Video, Hulu
+  #Year: 1964
+  #IMDb: 6.1
+  #Country: Russia
+#plot all runtimes
+runNA <- movdata[complete.cases(movdata$Runtime),] #data set without missing Runtime (16152 obs - 592 missing)
+runP <- plot_ly(runNA, x = ~Runtime) %>%
+  add_histogram() %>% 
+  layout(title = "Number of Movies per Runtime",
+        xaxis = list(title = "Runtime (min.)"),
+        yaxis = list(title = "Number of Movies"))
+runP
+
+#Min: 1 min (Short film)
+  #Movie: Liefling The Movie
+  #Platform: Netflix
+  #Year: 2010
+  #IMDb: 6.3
+  #Country: Canada
+
+#8.5% movies of have 90 min runtimes
+#plot runtimes less than 400
+runNA1 <- runNA[runNA$Runtime < 400,] #data with Runtime less than 400 (16149 obs - 3 removed)
+runP1 <- plot_ly(runNA1, x = ~Runtime) %>%
+  add_histogram() %>% 
+  layout(title = "Number of Movies per Runtime (less than 400 min)",
+        xaxis = list(title = "Runtime (min.)"),
+        yaxis = list(title = "Number of Movies"))
+runP1
+```
+
+## Platforms by Runtime
+```{r runPlat}
+#Count how many movies in platforms when missing runtimes values are taken out
+runNA <- as.data.frame(runNA)
+platMatRunCount <- sapply(X = runNA[7:10], FUN = table)
+platforms <- c("Netflix", "Hulu", "Prime Video", "Disney+")
+count_noR <- platMatRunCount[1:1, 1:4]
+count_yesR <- platMatRunCount[2:2, 1:4]
+count_yesRN <- count_yesR[1]
+count_yesRH <- count_yesR[2]
+count_yesRP <- count_yesR[3]
+count_yesRD <- count_yesR[4]
+```
+
+```{r rundistmiss, eval=FALSE, include=FALSE}
+#create distribution of platforms for movies without missing runtimes
+runplatNA <- plot_ly(runNA, x = ~platforms, y = ~count_yesR, type = 'bar', name = 'Yes') %>%
+  add_trace(y = ~count_noR, name = 'No') %>%
+  layout(title = "Number of Movies in Each Streaming Platform (w/o missing runtimes)",
+                        yaxis = list(title = 'Number of Movies'), 
+                        xaxis = list(title = 'Streaming Platform'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Is the movie in the platform?")))
+runplatNA #plot
+```
+
+```{r runplat2}
+#plot of runtime by platform
+runPlatbox <- plot_ly(data=runNA, y = ~Runtime[Netflix == 'Yes'], x = ~(Netflix=c("Yes")), type = 'box', name = 'Netflix', marker = list(color = "firebrick"), color=I("firebrick"), text = ~paste("Movie: ", runNA$Title[Netflix == "Yes"], '<br>Year:', runNA$Year[Netflix=="Yes"])) %>%
+    add_trace(y = ~Runtime[Hulu == 'Yes'], x = ~(Hulu=c("Yes")),  name = 'Hulu', marker = list(color = "#00EE76"), color=I("#00EE76"), text = ~paste("Movie: ", runNA$Title[Hulu == "Yes"], '<br>Year:', runNA$Year[Hulu=="Yes"])) %>%
+    add_trace(y = ~Runtime[PrimeVideo == 'Yes'], x = ~(PrimeVideo=c("Yes")), name = 'Prime Video', marker = list(color = "#000033"), color=I("#000033"), text = ~paste("Movie: ", runNA$Title[PrimeVideo == "Yes"], '<br>Year:', runNA$Year[PrimeVideo=="Yes"])) %>%
+    add_trace(y = ~Runtime[Disney == 'Yes'], x = ~(Disney=c("Yes")), name = 'Disney+', marker = list(color = "#0A47CC"), color=I("#0A47CC"), text = ~paste("Movie: ", runNA$Title[Disney == "Yes"], '<br>Year:', runNA$Year[Disney=="Yes"])) %>%
+    layout(title = "Runtimes for Each Platform",
+                        yaxis = list(title = 'Runtimes'), 
+                        xaxis = list(title = 'Platform',tickvals = c()),
+                        boxmode = "group",
+                        boxmean=TRUE,
+                        legend = list(title = list(text = "Platform")))
+runPlatbox
+```
+
+```{r averun, eval=FALSE, include=FALSE}
+#Create datasets for each platform with count levels
+runNetflix <- runNA %>% modify_if(is.character, as.factor) %>% group_by(Netflix, Runtime) %>% tally() %>% filter(Netflix == "Yes") %>% na.omit() %>% ungroup() %>% select(-Netflix) %>% 
+  mutate(NetflixPer = (n / count_yesRN)*100)
+names(runNetflix)[2] <- "Netflix" 
+aveRunN <- mean(runNetflix$Runtime) #compute average runtime of platform
+
+runHulu <- runNA %>% modify_if(is.character, as.factor) %>% group_by(Hulu, Runtime) %>% tally() %>% filter(Hulu == "Yes") %>% na.omit() %>% ungroup() %>% select(-Hulu) %>% 
+  mutate(HuluPer = (n / count_yesRH)*100)
+names(runHulu)[2] <- "Hulu" 
+aveRunH <- mean(runHulu$Runtime)
+
+runPrime <- runNA %>% modify_if(is.character, as.factor) %>% group_by(PrimeVideo, Runtime) %>% tally() %>% filter(PrimeVideo == "Yes") %>% na.omit() %>% ungroup() %>% select(-PrimeVideo) %>% 
+  mutate(PrimePer = (n / count_yesRP)*100)
+names(runPrime)[2] <- "PrimeVideo" 
+aveRunP <- mean(runPrime$Runtime)
+
+runDisney <- runNA %>% modify_if(is.character, as.factor) %>% group_by(Disney, Runtime) %>% tally() %>% filter(Disney == "Yes") %>% na.omit() %>% ungroup() %>% select(-Disney) %>% 
+  mutate(DisneyPer = (n / count_yesRD)*100)
+names(runDisney)[2] <- "Disney" 
+aveRunD <- mean(runDisney$Runtime)
+
+#combine averages and platforms into dataset
+averages <- c(aveRunN, aveRunH, aveRunP, aveRunD)
+aveRuntimes <- data.frame(platforms, averages)
+
+#Create plot of count of average runtimes by platforms
+runPlat <- plot_ly(aveRuntimes, x=~platforms, y=~averages, type="bar", marker=list(color=c("firebrick", "#00EE76", "#000033", "#0A47CC"))) %>%
+    layout(title = "Average Runtime of Each Platform",
+                        yaxis = list(title = 'Average Runtime'), 
+                        xaxis = list(title = 'Platform'))
+runPlat
+```
+
+## IMDb Rating
+```{r imdb, echo=TRUE}
+#IMDb rating
+#571 missing values in data, so graph includes 16173 observations
+#Highest: 9.3 with 6 movies
+    #do not have RottenTomatoes Ratings
+    #1 on Netflix, 5 on Prime
+#Lowest: 0 with 4 movies
+    #do not have RottenTomatoes Ratings
+    #3 in Prime, 1 in Hulu
+imdbNA <- movdata[complete.cases(movdata$IMDb),] #data set without missing IMDb
+imdbP <- plot_ly(imdbNA, x = ~IMDb) %>%
+  add_histogram() %>% 
+  layout(title = "Number of Movies per IMDb Rating",
+        xaxis = list(title = "IMDb Rating"),
+        yaxis = list(title = "Number of Movies"))
+imdbP
+
+#7489 movies with IMDb ratings less than 6 (46.3%)
+sum(na.omit(IMDb) < 6)
+#8684 movies with IMDb ratings greater than or equal to 6 (53.7%)
+sum(na.omit(IMDb) >= 6)
+```
+
+## Rotten Tomatoes Percent Rating
+```{r rot, echo=TRUE}
+#Rotten Tomatoes
+#11586 missing values, so graph includes 5158 observations
+#Highest: 100 with 407 movies (7.9%)
+    #IMDb ratings 3.6-8.6
+#Lowest: 2 with 4 movies
+    #IMDb ratings 4.4-5.4
+    #2 in Prime, 2 in Hulu
+rotNA <- movdata[complete.cases(movdata$RottenTomatoes),] #data set without NA RottenTomatoes
+rotP <- plot_ly(rotNA, x = ~RottenTomatoes) %>%
+  add_histogram() %>% 
+  layout(title = "Number of Movies per Rotten Tomatoes Percentage",
+        xaxis = list(title = "Rotten Tomatoes Percentage"),
+        yaxis = list(title = "Number of Movies"))
+rotP
+
+#1906 movies with rotten tomatoes ratings less than 6 (37.0%)
+sum(na.omit(RottenTomatoes) < 60)
+#3252 movies with rotten tomatoes ratings greater than or equal to 6 (63.0%)
+sum(na.omit(RottenTomatoes) >= 60)
+```
+
+## Platforms by Ratings
+```{r ratingsPlat}
+#plot of imdb rating by platform
+imdbPlat <- plot_ly(data=imdbNA, y = ~IMDb[Netflix == 'Yes'], x = ~(Netflix=c("Yes")), type = 'box', name = 'Netflix', marker = list(color = "firebrick"), color=I("firebrick"), text = ~paste("Movie: ", imdbNA$Title[Netflix == "Yes"], '<br>Year:', imdbNA$Year[Netflix=="Yes"])) %>%
+    add_trace(y = ~IMDb[Hulu == 'Yes'], x = ~(Hulu=c("Yes")),  name = 'Hulu', marker = list(color = "#00EE76"), color=I("#00EE76"), text = ~paste("Movie: ", imdbNA$Title[Hulu == "Yes"], '<br>Year:', imdbNA$Year[Hulu=="Yes"])) %>%
+    add_trace(y = ~IMDb[PrimeVideo == 'Yes'], x = ~(PrimeVideo=c("Yes")), name = 'Prime Video', marker = list(color = "#000033"), color=I("#000033"), text = ~paste("Movie: ", imdbNA$Title[PrimeVideo == "Yes"], '<br>Year:', imdbNA$Year[PrimeVideo=="Yes"])) %>%
+    add_trace(y = ~IMDb[Disney == 'Yes'], x = ~(Disney=c("Yes")), name = 'Disney+', marker = list(color = "#0A47CC"), color=I("#0A47CC"), text = ~paste("Movie: ", imdbNA$Title[Disney == "Yes"], '<br>Year:', imdbNA$Year[Disney=="Yes"])) %>%
+    layout(title = "IMDb Ratings for Each Platform",
+                        yaxis = list(title = 'IMDb Rating'), 
+                        xaxis = list(title = 'Platform',tickvals = c()),
+                        boxmode = "group",
+                        boxmean=TRUE,
+                        legend = list(title = list(text = "Platform")))
+
+#plot of Rotten tomatoes rating by platform
+rotPlat <- plot_ly(data=rotNA, y = ~RottenTomatoes[Netflix == 'Yes'], x = ~(Netflix=c("Yes")), type = 'box', name = 'Netflix', marker = list(color = "firebrick"), color=I("firebrick"), text = ~paste("Movie: ", rotNA$Title[Netflix == "Yes"], '<br>Year:', rotNA$Year[Netflix=="Yes"])) %>%
+    add_trace(y = ~RottenTomatoes[Hulu == 'Yes'], x = ~(Hulu=c("Yes")),  name = 'Hulu', marker = list(color = "#00EE76"), color=I("#00EE76"), text = ~paste("Movie: ", rotNA$Title[Hulu == "Yes"], '<br>Year:', rotNA$Year[Hulu=="Yes"])) %>%
+    add_trace(y = ~RottenTomatoes[PrimeVideo == 'Yes'], x = ~(PrimeVideo=c("Yes")), name = 'Prime Video', marker = list(color = "#000033"), color=I("#000033"), text = ~paste("Movie: ", rotNA$Title[PrimeVideo == "Yes"], '<br>Year:', rotNA$Year[PrimeVideo=="Yes"])) %>%
+    add_trace(y = ~RottenTomatoes[Disney == 'Yes'], x = ~(Disney=c("Yes")), name = 'Disney+', marker = list(color = "#0A47CC"), color=I("#0A47CC"), text = ~paste("Movie: ", rotNA$Title[Disney == "Yes"], '<br>Year:', rotNA$Year[Disney=="Yes"])) %>%
+    layout(title = "Rotten Tomatoes Ratings for Each Platform",
+                        yaxis = list(title = 'Rotten Tomatoes Rating'), 
+                        xaxis = list(title = 'Platform',tickvals = c()),
+                        boxmode = "group",
+                        boxmean=TRUE,
+                        legend = list(title = list(text = "Platform")))
+imdbPlat #imdb plot
+rotPlat  #rotten tomatoes plot
+```
+
+```{r ratave, eval=FALSE, include=FALSE}
+#Count how many movies in platforms when missing rating values are taken out
+ratingNA <- as.data.frame(ratingNA)
+platMatRatingCount <- sapply(X = ratingNA[7:10], FUN = table)
+#platforms <- c("Netflix", "Hulu", "Prime Video", "Disney+")
+count_noRa <- platMatRatingCount[1:1, 1:4]
+count_yesRa <- platMatRatingCount[2:2, 1:4]
+count_yesRaN <- count_yesRa[1]
+count_yesRaH <- count_yesRa[2]
+count_yesRaP <- count_yesRa[3]
+count_yesRaD <- count_yesRa[4]
+#IMDb and Rotten Tomato averages by Platform
+#Netflix
+ratingNAN <- ratingNA[ratingNA$Netflix == "Yes",]
+aveIN <- mean(ratingNAN$IMDb)
+aveRN <- mean(ratingNAN$RottenTomatoes)/10
+#Hulu
+ratingNAH <- ratingNA[ratingNA$Hulu == "Yes",]
+aveIH <- mean(ratingNAH$IMDb)
+aveRH <- mean(ratingNAH$RottenTomatoes)/10
+#Prime Video
+ratingNAP <- ratingNA[ratingNA$PrimeVideo == "Yes",]
+aveIP <- mean(ratingNAP$IMDb)
+aveRP <- mean(ratingNAP$RottenTomatoes)/10
+#Disney+
+ratingNAD <- ratingNA[ratingNA$Disney == "Yes",]
+aveID <- mean(ratingNAD$IMDb)
+aveRD <- mean(ratingNAD$RottenTomatoes)/10
+#Create matrix of all averages
+ratingAverages <- matrix(c(aveIN, aveRN, aveIH, aveRH, aveIP, aveRP, aveID, aveRD), ncol=4, byrow=TRUE)
+colnames(ratingAverages) <- c("Netflix", "Hulu", "PrimeVideo", "Disney")
+rownames(ratingAverages) <- c("IMDB","Rotten Tomatoes")
+ratingAverages <- as.data.frame(ratingAverages)
+ratingAverages$Ratings <- as.factor(rownames(ratingAverages))
+
+#Create plot of rating averages by platform
+attach(ratingAverages)
+ratingPlat <- plot_ly(data=ratingAverages, x = ~Ratings, y = ~Netflix, type = 'bar', name = 'Netflix', marker = list(color = "firebrick")) %>%
+    add_trace(y = ~Hulu, name = 'Hulu', marker = list(color = "#00EE76")) %>%
+    add_trace(y = ~PrimeVideo, name = 'Prime Video', marker = list(color = "#000033")) %>%
+    add_trace(y = ~Disney, name = 'Disney+', marker = list(color = "#0A47CC")) %>%
+    layout(title = "Average IMDb and Rotten Tomatoes Rating for Each Platform",
+                        yaxis = list(title = 'Average Rating'), 
+                        xaxis = list(title = 'Rating Type'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Platform")))
+ratingPlat
+```
+
+## Correlation between IMDb Rating and Rotten Tomatoes Percentage
+```{r corr, echo=TRUE}
+#data set without missing rating variables
+ratingNA <- movdata[complete.cases(movdata$RottenTomatoes, movdata$IMDb),] #5156 observations
+#for regression line
+fit <- ratingNA %>% lm(RottenTomatoes ~ IMDb,.) %>% fitted.values
+
+#Scatter plot of IMDb vs RottenTomatoes with Age
+rateAgePlot <- plot_ly(ratingNA) %>%
+  add_trace(x = ~IMDb, y = ~RottenTomatoes, type="scatter", mode = "markers", color=~Age, text = ~paste("Movie: ", Title, '<br>Year:', Year, '<br>Genre:', Genres, '<br>Runtime:', Runtime, '<br>Netflix:', Netflix, '<br>Hulu:', Hulu, '<br>Prime Video:', PrimeVideo, '<br>Disney+:', Disney)) %>%
+  add_lines(x=~IMDb, y=fit, mode = "lines",showlegend=FALSE) %>%
+  layout(title = "IMDb Rating vs. Rotten Tomatoes Percentage (with Age)", 
+         xaxis = list(title = "IMDb Rating", range=c(0,10)), 
+         yaxis = list(title = "Rotten Tomatoes Percentage"), range=c(0,100))
+rateAgePlot
+```
+
+```{r corrrun, eval=FALSE, include=FALSE}
+#density plot
+t <- ggplot(data=ratingNA)+ geom_bin2d(mapping = aes(x=IMDb, y=RottenTomatoes))
+ggplotly(t)
+#Scatter plot of IMDb vs RottenTomatoes with Runtime
+rateRunPlot <- plot_ly(ratingNA) %>%
+  add_trace(x = ~IMDb, y = ~RottenTomatoes, type="scatter", mode = "markers", color=~log(Runtime), text = ~paste("Movie: ", Title, '<br>Year:', Year, '<br>Genre:', Genres, '<br>Runtime:', Runtime, '<br>Netflix:', Netflix, '<br>Hulu:', Hulu, '<br>Prime Video:', PrimeVideo, '<br>Disney+:', Disney)) %>%
+  add_lines(x=~IMDb, y=fit, mode = "lines",showlegend=FALSE) %>%
+  layout(title = "IMDb Rating vs. Rotten Tomatoes Percentage (with Runtime)", 
+         xaxis = list(title = "IMDb Rating", range=c(0,10)), 
+         yaxis = list(title = "Rotten Tomatoes Percentage"))
+
+rateRunPlot
+```
+
+```{r corrtest}
+#Correlation test between IMDb and Rotten Tomatoes Ratings
+cor.test(RottenTomatoes, IMDb) 
+#p-value is less than 0.05, so correlation is significant
+#Correlation coefficient: 0.616
+```
+
+```{r logistic, eval=FALSE, include=FALSE}
+#logistic regression of age group from ratings
+library(aod)
+modelI <- glm(data=ratingNA, Age ~ IMDb, family = "binomial")
+summary(modelI)
+```
+
+## Platforms of "High Rating" Movies
+```{r topRot, echo=TRUE}
+#Create subset with top Rotten Tomatoes ratings from 80-100% or IMDb ratings from 8-10
+#uses data without missing values since we are counting by platform
+topRatings <- movdata[which(movdata$RottenTomatoes >= 80 | movdata$IMDb >= 8.0),] #2538 Movies
+#Since data relies on there being a value in either IMDB or RottenTomatoes, then we need new count values that counts the Movies in each platform when they don't have missings in both IMDb and RottenTomatoes
+#Create dataset that includes values if not missing in both ratings
+library(dplyr)
+ratingNDNA <- full_join(imdbNA, rotNA) #16175 obs - 569 missing - 3.3%
+#count how many of each platform are in this dataset
+platmatNRA <- sapply(X = ratingNDNA[7:10], FUN = table)
+count_noNRA <- platmatNRA[1:1, 1:4] 
+count_yesNRA <- platmatNRA[2:2, 1:4]
+platNA <- data.frame(platforms, count_yesNRA, count_noNRA) #reorganization of freq table
+```
+
+```{r highratedist, eval=FALSE, include=FALSE}
+#Plot number of Movies in each platform as a grouped bar chart
+#for data without missing values in either IMDb or Rotten Tomatoes
+#movies that Netflix has more movies than Prime with this dataset
+platNRA <- plot_ly(platNA, x = ~platforms, y = ~count_yesNRA, type = 'bar', name = 'Yes') %>%
+  add_trace(y = ~count_noNRA, name = 'No') %>%
+  layout(title = "Number of Movies in Each Streaming Platform (w/o missing)",
+                        yaxis = list(title = 'Number of Movies'), 
+                        xaxis = list(title = 'Streaming Platform'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Is the movie in the platform?")))
+platNRA #plot platNRA
+```
+
+```{r highrateplat}
+#create dataset that includes the counts of the number of Movies in or not in each platform with high ratings
+platmatTop <- sapply(X = topRatings[7:10], FUN = table)
+count_noTop <- platmatTop[1:1, 1:4] 
+count_yesTop <- platmatTop[2:2, 1:4]
+platdataTop <- data.frame(platforms, count_yesTop, count_noTop)
+
+#Plot of how many Movies with high ratings are in or not in each platform
+platTop <- plot_ly(platdataTop, x = ~platforms, y = ~count_yesTop, type = 'bar', name = 'Yes') %>%
+  add_trace(y = ~count_noTop, name = 'No') %>%
+  layout(title = "Number of Movies in Each Streaming Platform with High Ratings",
+                        yaxis = list(title = 'Number of Movies'), 
+                        xaxis = list(title = 'Streaming Platform'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Is the movie in the platform?")))
+
+#Calculate percent of Movies that have a high rating
+platTopPercY <- (count_yesTop / count_yesNRA)*100
+platTopPercN <- (count_noTop / count_noNRA)*100
+#Combine into percents and counts into dataset platdatatop
+platdataTop <- cbind(platdataTop, platTopPercY)
+platdataTop <- cbind(platdataTop, platTopPercN)
+platdataTop <- cbind(platdataTop, count_yesNRA)
+platdataTop <- cbind(platdataTop, count_noNRA)
+
+#Percentage is of how many higher rating movies are in/not in the platform over the total number of movies in/not in the platform
+#Ex: 32.6% of movies in Hulu have a high rating
+#Ex: 24.0% of movies in Disney+ have a high rating
+#Ex: 20.5% of movies in Netflix have a high rating
+
+#Ex: 12.9% of movies in Prime Video have a high rating
+#Ex: 23.4% of movies not in Prime Video have a high rating
+platTopPercP <- plot_ly(platdataTop, x = ~platforms, y = ~platTopPercY, type = 'bar', name = 'Yes') %>%
+    add_trace(y = ~platTopPercN, name = 'No') %>%
+    layout(title = "Percent of Movies in Each Streaming Platform with High Ratings",
+                        yaxis = list(title = 'Percent of Movies'), 
+                        xaxis = list(title = 'Streaming Platform'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Is the movie in the platform?")))
+
+platTop #plot top counts
+platTopPercP #plot top percents
+```
+
+## Relation of Different Platforms
+```{r alluv, echo=TRUE}
+# create alluvial diagram
+library(ggalluvial)
+library(ggfittext)
+Nalluv <- ggplot(movdata, aes(axis1 = Netflix, axis2 = Hulu, axis3 = PrimeVideo, axis4 = Disney, y = stat(count))) + 
+  geom_alluvium(aes(fill=Netflix), knot.pos=0) +
+  geom_stratum(alpha=.5) + 
+  geom_text(stat = "stratum", aes(label= after_stat(stratum))) + 
+  scale_x_discrete(limits = c("Netflix", "Hulu", "Prime Video", "Disney"), expand = c(.1, .1)) +
+  labs(title = "Movies of Streaming Platforms", subtitle = "stratified by Netflix", 
+       y = "Frequency") + 
+  theme_minimal()
+
+Halluv <- ggplot(movdata, aes(axis1 = Netflix, axis2 = Hulu, axis3 = PrimeVideo, axis4 = Disney, y = stat(count))) + 
+  geom_alluvium(aes(fill=Hulu), knot.pos=0) +
+  geom_stratum(alpha=.5) + 
+  geom_text(stat = "stratum", aes(label= after_stat(stratum))) + 
+  scale_x_discrete(limits = c("Netflix", "Hulu", "Prime Video", "Disney"), expand = c(.1, .1)) +
+  labs(title = "Movies of Streaming Platforms", subtitle = "stratified by Hulu", 
+       y = "Frequency") + 
+  theme_minimal()
+
+Palluv <- ggplot(movdata, aes(axis1 = Netflix, axis2 = Hulu, axis3 = PrimeVideo, axis4 = Disney, y = stat(count))) + 
+  geom_alluvium(aes(fill=PrimeVideo), knot.pos=0) +
+  geom_stratum(alpha=.5) + 
+  geom_text(stat = "stratum", aes(label= after_stat(stratum))) + 
+  scale_x_discrete(limits = c("Netflix", "Hulu", "Prime Video", "Disney"), expand = c(.1, .1)) +
+  labs(title = "Movies of Streaming Platforms", subtitle = "stratified by Prime Video", 
+       y = "Frequency") + 
+  theme_minimal()
+
+Dalluv <- ggplot(movdata, aes(axis1 = Netflix, axis2 = Hulu, axis3 = PrimeVideo, axis4 = Disney, y = stat(count))) + 
+  geom_alluvium(aes(fill=Disney), knot.pos=0) +
+  geom_stratum(alpha=.5) + 
+  geom_text(stat = "stratum", aes(label= after_stat(stratum))) + 
+  scale_x_discrete(limits = c("Netflix", "Hulu", "Prime Video", "Disney"), expand = c(.1, .1)) +
+  labs(title = "Movies of Streaming Platforms", subtitle = "stratified by Disney+", 
+       y = "Frequency") + 
+  theme_minimal()
+
+Nalluv
+Halluv
+Palluv
+Dalluv
+```
+
+```{r freq3, echo=TRUE}
+#There are no movies that are in all 4 platforms
+plat4 <- movdata[which(movdata$Netflix == "Yes" & movdata$Hulu == "Yes" & movdata$PrimeVideo == "Yes" & movdata$Disney == "Yes"),]
+
+#How many movies are on 3 platforms
+#Not in Disney - 6
+plat3NHP_D <- movdata[which(movdata$Netflix == "Yes" & movdata$Hulu == "Yes" & movdata$PrimeVideo == "Yes" & movdata$Disney == "No"),]
+#Not in Hulu - 1
+plat3N_HPD <- movdata[which(movdata$Netflix == "Yes" & movdata$Hulu == "No" & movdata$PrimeVideo == "Yes" & movdata$Disney == "Yes"),]
+#Not in Netflix - 2
+plat3_NHPD <- movdata[which(movdata$Netflix == "No" & movdata$Hulu == "Yes" & movdata$PrimeVideo == "Yes" & movdata$Disney == "Yes"),]
+#Not in Prime - 1
+plat3NH_PD <- movdata[which(movdata$Netflix == "Yes" & movdata$Hulu == "Yes" & movdata$PrimeVideo == "No" & movdata$Disney == "Yes"),]
+#Combine into 1 dataset - 7 (0.04% of data set)
+plat3 <- rbind(plat3NHP_D, plat3NH_PD)
+
+#How many movies are on 1 platforms
+#Only in Netflix - 3188 - 89.6% of Netflix
+plat1N <- movdata[which(movdata$Netflix == "Yes" & movdata$Hulu == "No" & movdata$PrimeVideo == "No" & movdata$Disney == "No"),]
+#Only in Hulu - 639 - 70.8% of Hulu
+plat1H <- movdata[which(movdata$Netflix == "No" & movdata$Hulu == "Yes" & movdata$PrimeVideo == "No" & movdata$Disney == "No"),]
+#Only in Prime - 11748 - 95.1% of Prime Video
+plat1P <- movdata[which(movdata$Netflix == "No" & movdata$Hulu == "No" & movdata$PrimeVideo == "Yes" & movdata$Disney == "No"),]
+#Only in Disney - 532 - 94.3& of Disney+
+plat1D <- movdata[which(movdata$Netflix == "No" & movdata$Hulu == "No" & movdata$PrimeVideo == "No" & movdata$Disney == "Yes"),]
+#Combine into 1 dataset - 16117 obs (96.3% of data set)
+plat1 <- rbind(plat1N, plat1H, plat1P, plat1D)
+
+#How many movies are on 2 platforms
+#In Netflix and Hulu - 18
+plat2NH <- movdata[which(movdata$Netflix == "Yes" & movdata$Hulu == "Yes" & movdata$PrimeVideo == "No" & movdata$Disney == "No"),]
+#In Netflix and Prime - 338
+plat2NP <- movdata[which(movdata$Netflix == "Yes" & movdata$Hulu == "No" & movdata$PrimeVideo == "Yes" & movdata$Disney == "No"),]
+#In Netflix and Disney - 8
+plat2ND <- movdata[which(movdata$Netflix == "Yes" & movdata$Hulu == "No" & movdata$PrimeVideo == "No" & movdata$Disney == "Yes"),]
+#In Hulu and Prime - 233
+plat2HP <- movdata[which(movdata$Netflix == "No" & movdata$Hulu == "Yes" & movdata$PrimeVideo == "Yes" & movdata$Disney == "No"),]
+#In Hulu and Disney - 4
+plat2HD <- movdata[which(movdata$Netflix == "No" & movdata$Hulu == "Yes" & movdata$PrimeVideo == "No" & movdata$Disney == "Yes"),]
+#In Prime and Disney - 16
+plat2PD <- movdata[which(movdata$Netflix == "No" & movdata$Hulu == "No" & movdata$PrimeVideo == "Yes" & movdata$Disney == "Yes"),]
+#Combine into 1 dataset - 617 obs (3.7% of data set)
+plat2 <- rbind(plat2NH, plat2NP, plat2ND, plat2HP, plat2HD, plat2PD)
+```
+
+## Blockbusters in each Platform
+```{r blockbusters, echo=TRUE}
+#import blockbuster dataset
+#Blockbuster dataset:
+# Top 10 blockbusters every year starting in 1975-2018
+# 437 movies
+bbdata <- read_csv("blockbusters.csv", 
+    col_types = cols(rank_in_year = col_integer()))
+#change variables to factor
+bbdata$rating <- as.factor(bbdata$rating)
+bbdata$studio <- as.factor(bbdata$studio)
+bbdata$imdb_rating <- as.numeric(bbdata$imdb_rating)
+
+#2019 data scraped from https://www.boxofficemojo.com/year/2019/
+#bbdata now has 447 movies
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 1, "PG-13", "Walt Disney Pictures", "Avengers: Endgame", "$858,373,000", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 2, "PG", "Walt Disney Pictures", "The Lion King", "$543,638,043", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 3, "G", "Walt Disney Pictures", "Toy Story 4", "$434,038,008", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 4, "PG", "Walt Disney Pictures", "Frozen II", "$430,144,682", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 5, "PG-13", "Walt Disney Pictures", "Captain Marvel", "$426,829,839", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 6, "PG-13", "Walt Disney Pictures", "Star Wars: The Rise of Skywalker", "$390,706,234", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 7, "PG-13", "Sony Pictures", "Spider-Man: Far from Home", "$390,532,085", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 8, "PG", "Walt Disney Pictures", "Aladdin", "$355,559,216", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 9, "R", "Warner Bros", "Joker", "$333,772,511", 2019))
+bbdata <- rbind(bbdata, c(NA, NA, NA, NA, NA, 10, "R", "Warner Bros", "It Chapter Two", "$211,593,228", 2019))
+
+names(bbdata)[9] <- "Title" #capitalize title column
+#merge platform and blockbuster data sets to determine which platforms have blockbusters
+bbinplat <- merge(movdata, bbdata, by = "Title")
+bbinplat <- as.data.frame(bbinplat)
+#check that the years for each data set match
+#yearsbb <- plot_ly(bbinplat, x = ~year, y = ~Year, type="scatter", mode = "markers",
+                    #text = ~paste("Movie: ", Title)) %>%
+  #layout(title = "Years of Blockbuster Movies in Platforms", 
+         #xaxis = list(title = "Blockbuster Movie Year"), 
+         #yaxis = list(title = "Platform Movie Year"),
+         #showlegend = FALSE)
+#yearsbb
+
+#remove 17 movies:
+#The Lion King 2019, Aladdin 2019, Joker, The Amityville Horror, Annie, Footloose, Back to School, The Little Mermaid, A Star is Born 1937, The Nutty Professor, The Hunchback of Notre Dame, Alice in Wonderland, Suicide Squad, Cinderella, The Jungle Book, Inside Out
+bbinplat <- bbinplat[-c(9, 109, 60, 94, 11, 39, 19, 110, 111, 5, 116, 103, 10, 89, 32, 106, 56), ]
+
+#number of movies in each platform
+#No missing data in each platform
+platMatbb <- sapply(X = bbinplat[7:10], FUN = table) #frequency table
+platforms <- c("Netflix", "Hulu", "Prime Video", "Disney+") #names of platforms
+count_nobb <- platMatbb[1:1, 1:4] #extracts frequencies of "No" values
+count_yesbb <- platMatbb[2:2, 1:4] #extracts frequencies of "Yes" values
+count_yesNbb <- count_yesbb[1] #total number of movies in Netflix - 3560 (21.3%)
+count_yesHbb <- count_yesbb[2] #total number of movies in Hulu - 903 (5.4%)
+count_yesPbb <- count_yesbb[3] #total number of movies in Prime Video - 12354 (73.8%)
+count_yesDbb <- count_yesbb[4] #total number of movies in Disney - 564 (3.4%)
+platdatabb <- data.frame(platforms, count_yesbb, count_nobb) #reorganization of freq table
+
+#Plot number of blockbusters movies in each platform as a grouped bar chart
+platbb <- plot_ly(platdatabb, x = ~platforms, y = ~count_yesbb, type = 'bar', name = 'Yes') %>%
+  add_trace(y = ~count_nobb, name = 'No') %>%
+  layout(title = "Number of Blockbuster Movies in Each Streaming Platform",
+                        yaxis = list(title = 'Number of Movies'), 
+                        xaxis = list(title = 'Streaming Platform'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Is the movie in the platform?")))
+
+#Calculate percent of Movies that have are blockbusters
+platbbPercY <- (count_yesbb / count_yes)*100
+platbbPercN <- (count_nobb / count_no)*100
+#Combine into percents and counts into dataset platdatatop
+platdatabb <- cbind(platdatabb, platbbPercY)
+platdatabb <- cbind(platdatabb, platbbPercN)
+platdatabb <- cbind(platdatabb, count_yes)
+platdatabb <- cbind(platdatabb, count_no)
+platbbPercP <- plot_ly(platdatabb, x = ~platforms, y = ~platbbPercY, type = 'bar', name = 'Yes') %>%
+    add_trace(y = ~platbbPercN, name = 'No') %>%
+    layout(title = "Percent of Blockbuster Movies in Each Streaming Platform",
+                        yaxis = list(title = 'Percent of Movies'), 
+                        xaxis = list(title = 'Streaming Platform'),
+                        barmode = 'group',
+                        legend = list(title = list(text = "Is the blockbuster movie in the platform?")))
+
+platbb #plot platbb
+platbbPercP
+```
+
+```{r studio, eval=FALSE, include=FALSE}
+## Streaming Platform Blockbuster Studios
+#Studio
+#No missing blockbuster studio data in platforms
+studioplatP <- plot_ly(bbinplat, x = ~studio) %>%
+  add_histogram() %>% 
+  layout(title = "Number of Blockbuster Movies of all Platforms per Studio",
+        xaxis = list(title = "Studio"),
+        yaxis = list(title = "Number of Movies"))
+#plot overall distribution of blockbuster movies
+studiobbP <- plot_ly(bbdata, x = ~studio) %>%
+  add_histogram() %>% 
+  layout(title = "Number of all Blockbuster Movies per Studio",
+        xaxis = list(title = "Studio"),
+        yaxis = list(title = "Number of Movies"))
+studioplatP
+studiobbP
+```
+
+## Ratings of Blockbuster Movies on Platforms
+```{r bbratings}
+ratingbbNA <- bbinplat[complete.cases(bbinplat$RottenTomatoes, bbinplat$IMDb),] #114 observations
+fitbb <- ratingbbNA %>% lm(RottenTomatoes ~ IMDb,.) %>% fitted.values #for regression line
+#Order rank
+ratingbbNA$rank_in_year <- as.factor(ordered(ratingbbNA$rank_in_year, levels = c("1", "2", "3", "4", "5","6", "7", "8", "9", "10")))
+#plot platform blockbusters imdb by rotten tomatoes, colored by rank
+ratebbPlot <- plot_ly(ratingbbNA) %>%
+  add_trace(x = ~IMDb, y = ~RottenTomatoes, type="scatter", mode = "markers", color=~reorder(rank_in_year, -rank_in_year), text = ~paste("Movie: ", Title, '<br>Year:', Year, '<br>Genre:', Genres, '<br>Runtime:', Runtime, '<br>Netflix:', Netflix, '<br>Hulu:', Hulu, '<br>Prime Video:', PrimeVideo, '<br>Disney+:', Disney, '<br>Rank:', rank_in_year)) %>%
+  add_lines(x=~IMDb, y=fitbb, mode = "lines",showlegend=FALSE) %>%
+  layout(title = "IMDb Rating vs. Rotten Tomatoes Percentage (with Blockbuster Rank)", 
+         xaxis = list(title = "IMDb Rating", range=c(0,10)), 
+         yaxis = list(title = "Rotten Tomatoes Percentage"), range=c(0,100))
+ratebbPlot
+#Correlation test between IMDb and Rotten Tomatoes Ratings
+cor.test(ratingbbNA$IMDb, ratingbbNA$RottenTomatoes) 
+#p-value is less than 0.05, so correlation is significant
+#Correlation coefficient: 0.737
+```
+
+```{r gross, eval=FALSE, include=FALSE}
+## Gross of Blockbuster Movie vs. Rating
+#data set of all blockbusters without missing imdb ratings
+grossdata <- bbdata[complete.cases(bbdata$imdb_rating),]
+#Remove $ and , symbols from Gross variable and change to numeric
+grossdata$worldwide_gross <- (gsub("\\$", "", grossdata$worldwide_gross))
+grossdata$worldwide_gross <- as.numeric(gsub("\\,", "", grossdata$worldwide_gross))
+
+#fitted line for plot
+fitbbrate <- grossdata %>% lm(imdb_rating ~ worldwide_gross,.) %>% fitted.values
+grossRateP <- plot_ly(grossdata, x = ~imdb_rating, y = ~worldwide_gross, text = ~paste("Movie: ", Title, '<br>Year:', year))
+grossRateP <- grossRateP %>% add_markers() %>% add_lines(x=~imdb_rating, y=fitbbrate, mode = "lines", showlegend=FALSE) %>%   layout(title = "IMDb Rating vs. Worldwide Gross of Blockbusters", 
+         xaxis = list(title = "IMDb Rating", range=c(0,10)), 
+         yaxis = list(title = "Worldwide Gross"))
+grossRateP
+
+grossdata$imdb_rating <- as.numeric(grossdata$imdb_rating)
+#Correlation test between IMDb and Worldwide Gross
+cor.test(grossdata$imdb_rating, grossdata$worldwide_gross) 
+#p-value is less than 0.05, so correlation is significant
+#Correlation coefficient: 0.213
+```
